@@ -539,8 +539,8 @@ fig6 <- preds_2024_all %>%
          category == "New dwellings",
          date >= as.Date("2022-01-01")) %>%
   ggplot(aes(date)) +
-  geom_line(aes(y = actual), size = 0.8) +
-  geom_line(aes(y = .pred),  linetype = "dashed", size = 0.8) +
+  geom_line(aes(y = actual), linewidth = 0.8) +
+  geom_line(aes(y = .pred),  linetype = "dashed", linewidth = 0.8) +
   scale_x_date(date_breaks = "6 months", date_labels = "%b\n%Y") +
   labs(title = "Auckland new‑dwelling consents: actual vs predicted",
        x = NULL, y = "Consents") +
@@ -553,7 +553,7 @@ ggsave("figures/fig6_auck_overlay.png", fig6,
 fig7 <- preds_2024_all %>%
   ggplot(aes(actual, .pred)) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  geom_point(alpha = 0.5, size = 1.3) +
+  geom_point(alpha = 0.5, linewidth = 1.3) +
   labs(title = "Predicted vs actual – 2024 hold‑out",
        x = "Actual", y = "Predicted") +
   theme_minimal(base_size = 11)
