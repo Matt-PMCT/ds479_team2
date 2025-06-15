@@ -459,6 +459,138 @@ preds_2024_all %>%
     )
   })
 
+# ADDITIONS FOR RESULTS SECTION AND FIGURE OUTPUTS 
+
+dir_create("model_outputs")
+dir_create("models")
+dir_create("figures")
+
+# 1. SAVE TIDY HOLD‑OUT PREDICTIONS
+write_csv(
+  preds_2024_all %>% 
+    select(territorial_authority, category, date,
+           prediction = .pred, actual),
+  "model_outputs/holdout_2024_predictions.csv"
+)
+
+
+# 2. SAVE EACH WORKFLOW FOR LATER FEATURE IMPORTANCE
+#    (rerun loop quickly with map to avoid side-effects)
+
+library(xgboost)
+
+walk2(
+  groups$territorial_authority, groups$category,
+  function(ta, cat) {
+
+    df_full  <- data_monthly_all %>% 
+      filter(territorial_authority == ta, category == cat,
+             date < as.Date("2024-01-01"))
+
+    wf_trn <- workflow() %>%
+      add_recipe(rec) %>%
+      add_model(
+        boost_tree(
+          trees       = model_params$trees,
+          tree_depth  = model_params$tree_depth,
+          learn_rate  = model_params$learn_rate,
+          sample_size = model_params$sample_size
+        ) %>% set_engine("xgboost") %>% set_mode("regression")
+      ) %>%
+      fit(make_features(df_full))
+
+    saveRDS(
+      wf_trn,
+      file = file.path(
+        "models",
+        str_c(
+          str_replace_all(ta, "\\s+", "_"), "_",
+          str_replace_all(cat, "\\s+", "_"), ".rds"
+        )
+      )
+    )
+  }
+)
+
+# 3. BUILD MEAN FEATURE IMPORTANCE TABLE
+model_files <- list.files("models", "\\.rds$", full.names = TRUE)
+
+feat_imp <- map_dfr(
+  model_files,
+  function(f) {
+    wf <- readRDS(f)
+    booster <- extract_fit_parsnip(wf)$fit        # xgb.Booster
+    xgb.importance(model = booster) %>%
+      transmute(feature = Feature, gain = Gain)
+  }
+) %>%
+  group_by(feature) %>%
+  summarise(gain = mean(gain), .groups = "drop") %>%
+  arrange(desc(gain))
+
+write_csv(feat_imp, "model_outputs/feature_importance.csv")
+
+
+# 4. FOUR PUBLICATION FIGURES
+
+# Figure 6 – Auckland overlay (2022-2024)
+fig6 <- preds_2024_all %>%
+  filter(territorial_authority == "Auckland",
+         category == "New dwellings",
+         date >= as.Date("2022-01-01")) %>%
+  ggplot(aes(date)) +
+  geom_line(aes(y = actual), size = 0.8) +
+  geom_line(aes(y = .pred),  linetype = "dashed", size = 0.8) +
+  scale_x_date(date_breaks = "6 months", date_labels = "%b\n%Y") +
+  labs(title = "Auckland new‑dwelling consents: actual vs predicted",
+       x = NULL, y = "Consents") +
+  theme_minimal(base_size = 11)
+
+ggsave("figures/fig6_auck_overlay.png", fig6,
+       width = 7, height = 4, dpi = 300)
+
+# Figure 7 – all series scatter
+fig7 <- preds_2024_all %>%
+  ggplot(aes(actual, .pred)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  geom_point(alpha = 0.5, size = 1.3) +
+  labs(title = "Predicted vs actual – 2024 hold‑out",
+       x = "Actual", y = "Predicted") +
+  theme_minimal(base_size = 11)
+
+ggsave("figures/fig7_pred_vs_actual.png", fig7,
+       width = 5, height = 5, dpi = 300)
+
+# Figure 8 – residual histogram
+fig8 <- preds_2024_all %>%
+  mutate(residual = .pred - actual) %>%
+  ggplot(aes(residual)) +
+  geom_histogram(bins = 40, colour = "white") +
+  labs(title = "Distribution of residuals – 2024 hold‑out",
+       x = "Prediction minus actual", y = "Frequency") +
+  theme_minimal(base_size = 11)
+
+ggsave("figures/fig8_residuals.png", fig8,
+       width = 6, height = 4, dpi = 300)
+
+# Figure 9 – mean feature importance (top 20)
+fig9 <- feat_imp %>%
+  slice_max(gain, n = 20) %>%
+  arrange(gain) %>%
+  mutate(feature = fct_inorder(feature)) %>%
+  ggplot(aes(gain, feature)) +
+  geom_col() +
+  labs(title = "Top 20 XGBoost features by mean gain",
+       x = "Mean gain", y = NULL) +
+  theme_minimal(base_size = 11)
+
+ggsave("figures/fig9_feature_importance.png", fig9,
+       width = 6, height = 6, dpi = 300)
+
+message("Outputs created in model_outputs/, models/, and figures/")
+
+
+
 # Record end time and duration
 end_time <- Sys.time()
 message("Process completed at: ", end_time)
